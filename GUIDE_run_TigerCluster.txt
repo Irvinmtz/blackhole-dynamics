@@ -1,0 +1,279 @@
+Run code on (the Tiger) Cluster:
+
+---------------------------------------------------------------------------
+Libraries:
+---------------------------------------------------------------------------
+The code needs the libraries: ODEPACK, LAPACK, GSL
+Download and unpack each of these programs. 
+The programs must be compiled as shared objects.
+Normally this can be done by just adding '-fPIC' to the compile line.
+This will be shown below for each of the programs.
+---------------------------------------------------------------------------
+
+
+---------------------------------------------------------------------------
+ODEPACK - We use LSODE from ODEPACK to solve the diff equations.
+---------------------------------------------------------------------------
+Go to http://computation.llnl.gov/casc/odepack/
+	Double precision ODEPACK (Download it)
+Make shared library (libs_odepackdp_JS.so):
+gfortran -fPIC -c opkda1.f opkda2.f opkdmain.f
+gfortran -fPIC -shared -o libs_odepackdp_JS.so opkda1.o opkda2.o opkdmain.o
+You now have libs_odepackdp_JS.so (or whatever name you choose).
+I don't know if its necessary to copy this lib .so to the folder where the main code is.
+---------------------------------------------------------------------------
+
+
+---------------------------------------------------------------------------
+LAPACK - used for lin alg operations. We use it for calc matrix eigen vecs, vals, inverse, etc.
+---------------------------------------------------------------------------
+http://www.netlib.org/lapack/
+It is important to compile LAPACK as a shared library. For this we need to add -fPIC
+a few places in the make.inc (also see make.inc.example for a template example as described in README).
+Do the following:
+
+In the top of make.inc you see:
+FORTRAN  = gfortran 
+OPTS     = -O2 -frecursive
+DRVOPTS  = $(OPTS)
+NOOPT    = -O0 -frecursive
+LOADER   = gfortran
+LOADOPTS =
+
+Change to:
+FORTRAN  = gfortran -fPIC
+OPTS     = -O2 -fPIC
+DRVOPTS  = $(OPTS)
+NOOPT    = -O0 -fPIC
+LOADER   = gfortran -fPIC
+LOADOPTS =
+
+Im not sure if we need the -frecursive. But it works fine without.
+Now compile by typing:
+make blaslib
+make
+More info see e.g. https://icl.cs.utk.edu/lapack-forum/viewtopic.php?f=2&t=3589 
+To see a list of the LAPACK routines: http://www.netlib.org/lapack/double/
+---------------------------------------------------------------------------
+
+
+---------------------------------------------------------------------------
+GSL - we use gsl to calc e.g. the self grav elliptical integral.
+---------------------------------------------------------------------------
+Install gsl 
+gsl is written in c, so we need a wrapper.
+For the function we need, the wrapper must look like this:
+
+#include </usr/local/include/gsl/gsl_sf_ellint.h>
+void c_wrapper_gsl_sf_ellint_rj_(double* R, double* x, double* y, double* z, double* p, double* err){
+        *R = gsl_sf_ellint_RJ(*x, *y, *z, *p, *err);
+}
+
+save it as: gslwr.c
+Make shared object:
+type: gcc -c -fPIC gslwr.c
+link to gsl when compiling: gcc -Wall -I/usr/local/include -c example.c if its not working..
+---------------------------------------------------------------------------
+
+
+---------------------------------------------------------------------------
+Compile:
+---------------------------------------------------------------------------
+
+INFO:
+
+The main code is split into two files:
+1) 'TEST_module_Nbody_AffineTides_solver.f90'
+This file contains the main code in one big 'module'.
+2) 'TEST_main_Nbody_AffineTides_solver.f90'
+This file contains two different interphases that can
+be used to communicate with the main code. The two interphases
+are respectively a subroutine and a program.
+
+CLUSTER NOTES:
+WARNING: It looks like that if we submit a job to the cluster and its in the queue (waiting)
+and we then change a few things in the code, it will when it starts running use the
+edited code, i.e., it will use the code as it looks like when its start running!!
+The best thing is therefore to copy different versions to different directories
+and then run them from there without touching them before the run is finish.
+
+
+NORMAL compilation (local machine/laptop):
+This compilation will generate an executable file which takes an input file and can return a lot of different info in output .txt files.
+LOCAL machine:
+gfortran TEST_module_Nbody_AffineTides_solver.f90 TEST_main_Nbody_AffineTides_solver.f90 -o TEST_main_Nbody_AffineTides_solver.exe /Users/jsamsing/Desktop/TIDES_PROJ/libs_odepackdp_JS.so gslwr.o -lgsl -lgslcblas -L/Users/jsamsing/Desktop/LAPACK/lapack-3.5.0/ -llapack -lrefblas
+
+Ubuntu
+./TEST_main_Nbody_AffineTides_solver.exe < MCinput_Nbody_102020BH_paper2.txt 
+  122  gfortran TEST_module_Nbody_AffineTides_solver.f90 TEST_main_Nbody_AffineTides_solver.f90 -o TEST_main_Nbody_AffineTides_solver.exe /home/irvin/Desktop/johan-simulation/libs_odepackdp_JS.so gslwr.o -L/usr/local/lib -lgsl -lgslcblas -L/home/irvin/Desktop/johan-simulation/lapack-3.7.1 -llapack -lrefblas
+ 
+ Run using ./TEST_main_Nbody_AffineTides_solver.exe < MCinput_Nbody_102020BH_paper2.txt
+
+CLUSTER:
+gfortran TEST_module_Nbody_AffineTides_solver.f90 TEST_main_Nbody_AffineTides_solver.f90 -o TEST_main_Nbody_AffineTides_solver.exe /home/jsamsing/Nbody/libs_odepackdp_JS.so gslwr.o -L/home/jsamsing/GSL/gsl-1.16/lib/ -lgsl -lgslcblas -L/home/jsamsing/LAPACK/lapack-3.5.0/ -llapack -lrefblas
+
+Run using input file: ./testname < inputfile
+
+
+f2py compilation:  
+In this compilation we use f2py to make it possible to call a fortran subroutine from python. We need that in many cases, e.g., if we want to use MPI for parallel computations.
+
+
+LOCAL machine:
+First compile the module file:
+gfortran -c TEST_module_Nbody_AffineTides_solver.f90
+
+f2py -c --f90exec=gfortran --f90flags=-fPIC --f77flags=-fPIC TEST_module_Nbody_AffineTides_solver.f90 TEST_main_Nbody_AffineTides_solver.f90 only: interfacesub : -m testname /Users/jsamsing/Desktop/TIDES_PROJ/libs_odepackdp_JS.so gslwr.o -lgsl -lgslcblas -L/Users/jsamsing/Desktop/LAPACK/lapack-3.5.0/ -llapack -lrefblas
+
+
+CLUSTER:
+First compile the module file:
+gfortran -c TEST_module_Nbody_AffineTides_solver.f90
+
+Then compile the main file with all libs and modules:
+f2py -c --f90exec=/usr/bin/gfortran --f90flags=-fPIC --f77flags=-fPIC TEST_module_Nbody_AffineTides_solver.f90 TEST_main_Nbody_AffineTides_solver.f90 only: interfacesub : -m testname /home/jsamsing/Nbody/libs_odepackdp_JS.so gslwr.o -L/home/jsamsing/GSL/gsl-1.16/lib/ -lgsl -lgslcblas -L/home/jsamsing/LAPACK/lapack-3.5.0/ -llapack -lrefblas
+
+
+MC routine: MC_mpi_Nbody_2.py
+
+Intall MPI on cluster:
+module load python
+module load openmpi/gcc/1.8.8/64
+pip2.7 install --user mpi4py
+
+
+Moving code to new folder:
+* recompile and change paths in compile line.
+* change path in parallel.cmd 
+
+
+to see when the sim starts:
+squeue --start -u jsamsing
+
+
+---------------------------------------------------------------------------
+Run:
+---------------------------------------------------------------------------
+On local machine:
+SCOOP:	python -m scoop -n 8 PV_MC.py  - see SCOOP website for more info on this.
+MPI:	mpirun -np 8 python MC_mpi_Nbody_2.py
+OR: orterun -np 8 python MC_mpi_Nbody_2.py
+
+
+On cluster (no submit script, only for testing!!):
+mpirun -np 8 python MC_mpi_Nbody_2.py
+
+
+Run correctly at Tiger Cluster (SLURM) with this script:
+
+#!/bin/bash
+#parallel job using X processors. and runs for X hours (max)
+#SBATCH -N 2
+#SBATCH --ntasks-per-node=16
+#SBATCH -t 1:00:00
+# sends mail when process begins, and
+# when it ends. Make sure you define your email
+# address.
+#SBATCH -J NbodyTidesTest
+#SBATCH -p test
+#SBATCH --mail-type=begin
+#SBATCH --mail-type=end
+#SBATCH --mail-user=jsamsing@princeton.edu
+module load python
+module load openmpi/gcc/1.8.8/64
+cd /home/jsamsing/Nbody/
+mpirun python MC_mpi_Nbody_1.py
+
+submit job:
+sbatch parallel.cmd
+---------------------------------------------------------------------------
+
+Log on to cluster:
+ssh -Y jsamsing@tiger.princeton.edu (-y enables x11 graphics to be shown)
+
+Copy files to cluster:
+scp Nbody_AffineTides_solver_6.exe MC_Nbody_AffineTides.py jsamsing@tiger.princeton.edu:/home/jsamsing/Nbody/
+
+download data to laptop:
+go to folder on laptop: /Users/jsamsing/Desktop/TIDES_PROJ/MC_OUTPUT and type:
+sftp jsamsing@tiger.princeton.edu:/scratch/network/jsamsing/Stellar_Tides/TEST_* /Users/jsamsing/Desktop/TIDES_PROJ/MC_OUTPUT/
+'where TEST' is the name of the sim set.
+
+
+
+
+
+
+FURTHER INFO:
+
+** We have to save all DATA to the folder: /scratch/network/jsamsing/…
+There is NOT space enough in the home folder. BUT, the /scratch folder
+is deleted every 180 days. So we need to either back up, or redo sim
+if we think we pass 180 days.
+See: http://www.princeton.edu/researchcomputing/computational-hardware/tiger/user-guidelines/
+
+https://www.princeton.edu/researchcomputing/computational-hardware/tiger/tutorials/
+
+
+scancel <jobid>
+
+https://github.com/soravux/scoop/issues/25
+http://tldp.org/HOWTO/Program-Library-HOWTO/shared-libraries.html
+http://www.shocksolution.com/2009/10/building-and-linking-to-a-shared-fortran-library/
+
+
+
+
+!--------------------------------------------------------------------------------------------------------
+CORES AND TIME LIMITS:
+!--------------------------------------------------------------------------------------------------------
+
+test queue
+ 
+1 hour limit
+2048 core limit per job
+9472 total cores available
+2 job maximum per user
+ 
+vshort queue
+6 hour limit
+2048 core limit per job
+8512 total cores available
+64  job maximum per user
+ 
+short queue
+ 
+24 hour limit
+2048 core limit per job
+8512 total cores available
+64  job maximum per user
+ 
+ 
+medium queue
+ 
+72 hour limit
+512 core limit per job
+7104 total cores available
+64 job maximum per user
+ 
+ 
+long queue
+ 
+144 hour limit
+256 core limit per job
+4736 total cores available
+64 job maximum per user
+!--------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
